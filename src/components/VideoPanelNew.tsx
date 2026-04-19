@@ -24,7 +24,7 @@ const VIDEO_STALL_TIMEOUT = 5000; // 5 seconds
 
 const VideoPanelNew = ({ companyName, displayMode = "video", announcementText = "", playlist = [], companyInfo }: Props) => {
   const showVideo = displayMode === "video";
-  const activePlaylist = playlist.length > 0 ? playlist : DEFAULT_PLAYLIST;
+  const activePlaylist = DEFAULT_PLAYLIST;
 
   const [activePlayer, setActivePlayer] = useState<0 | 1>(0);
   const [src0, setSrc0] = useState(activePlaylist[0]);
@@ -36,23 +36,21 @@ const VideoPanelNew = ({ companyName, displayMode = "video", announcementText = 
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoPlayingRef = useRef(false);
 
-  // When playlist finishes loading from Supabase, update sources
+  // Initialize state once on mount
   useEffect(() => {
-    if (playlist.length > 0) {
-      let startIdx = 0;
-      const savedIndexStr = localStorage.getItem("primeVideoIndex");
-      if (savedIndexStr !== null) {
-        const parsedIdx = parseInt(savedIndexStr, 10);
-        if (!isNaN(parsedIdx) && parsedIdx >= 0 && parsedIdx < playlist.length) {
-          startIdx = parsedIdx;
-        }
+    let startIdx = 0;
+    const savedIndexStr = localStorage.getItem("primeVideoIndex");
+    if (savedIndexStr !== null) {
+      const parsedIdx = parseInt(savedIndexStr, 10);
+      if (!isNaN(parsedIdx) && parsedIdx >= 0 && parsedIdx < activePlaylist.length) {
+        startIdx = parsedIdx;
       }
-      setSrc0(playlist[startIdx]);
-      setSrc1(playlist[(startIdx + 1) % playlist.length]);
-      setCurrentIndex(startIdx);
-      setActivePlayer(0);
     }
-  }, [playlist]);
+    setSrc0(activePlaylist[startIdx]);
+    setSrc1(activePlaylist[(startIdx + 1) % activePlaylist.length]);
+    setCurrentIndex(startIdx);
+    setActivePlayer(0);
+  }, []);
 
   const videoRef0 = useRef<HTMLVideoElement>(null);
   const videoRef1 = useRef<HTMLVideoElement>(null);
@@ -64,16 +62,22 @@ const VideoPanelNew = ({ companyName, displayMode = "video", announcementText = 
 
   useEffect(() => {
     const handleGlobalPlay = () => {
-      const activeRef = getActiveRef();
-      if (activeRef.current) {
-        activeRef.current.muted = false;
-        activeRef.current.volume = 1.0;
-        activeRef.current.play().catch(console.error);
-      }
+      [videoRef0, videoRef1].forEach((ref, idx) => {
+        if (ref.current) {
+          ref.current.muted = false;
+          ref.current.volume = 1.0;
+          const playPromise = ref.current.play();
+          if (idx !== activePlayer) {
+            playPromise?.then(() => ref.current?.pause()).catch(console.error);
+          } else {
+            playPromise?.catch(console.error);
+          }
+        }
+      });
     };
     window.addEventListener("force-video-play", handleGlobalPlay);
     return () => window.removeEventListener("force-video-play", handleGlobalPlay);
-  }, [getActiveRef]);
+  }, [activePlayer]);
 
   // Reset stall timer - called when video is playing normally
   const resetStallTimer = useCallback(() => {
@@ -130,32 +134,20 @@ const VideoPanelNew = ({ companyName, displayMode = "video", announcementText = 
           hasRestoredTimeRef.current = true;
         }
 
-        // Try playing without muting first
-        el.muted = isMuted;
+        // Play with sound strictly
+        el.muted = false;
+        setIsMuted(false);
         el.volume = 1.0;
         el.play()
           .then(() => {
             resetStallTimer();
           })
-          .catch(() => {
-            // Autoplay blocked without mute, fallback to muted
-            el.muted = true;
-            setIsMuted(true);
-            el.play().then(() => resetStallTimer()).catch(() => startStallDetection());
+          .catch((err) => {
+            console.error("Autoplay with sound failed despite interaction:", err);
+            startStallDetection();
           });
 
-        // Auto-unmute on first user interaction if currently muted
-        const unmute = () => {
-          setIsMuted(false);
-          el.muted = false;
-          el.volume = 1.0;
-          document.removeEventListener("click", unmute);
-          document.removeEventListener("keydown", unmute);
-          document.removeEventListener("touchstart", unmute);
-        };
-        document.addEventListener("click", unmute, { once: true });
-        document.addEventListener("keydown", unmute, { once: true });
-        document.addEventListener("touchstart", unmute, { once: true });
+        // Auto-unmute logic is no longer needed since we start with sound
       }
     }
   }, [showVideo, activePlayer]);
@@ -201,15 +193,9 @@ const VideoPanelNew = ({ companyName, displayMode = "video", announcementText = 
 
     if (nextRef.current) {
       nextRef.current.currentTime = 0;
-      nextRef.current.muted = isMuted;
+      nextRef.current.muted = false; // strictly play with sound now
       nextRef.current.volume = 1.0;
-      nextRef.current.play().catch(() => {
-        if (nextRef.current) {
-          nextRef.current.muted = true;
-          setIsMuted(true);
-          nextRef.current.play().catch(console.error);
-        }
-      });
+      nextRef.current.play().catch(console.error);
     }
 
     setTimeout(() => {
@@ -233,7 +219,7 @@ const VideoPanelNew = ({ companyName, displayMode = "video", announcementText = 
               zIndex: activePlayer === pIdx ? 10 : 1
             }}
             playsInline
-            muted={isMuted}
+            muted={false} // Force unmuted by default
             preload="auto"
             onEnded={activePlayer === pIdx ? handleVideoEnded : undefined}
             onError={() => { if (activePlayer === pIdx) handleVideoEnded(); }}
