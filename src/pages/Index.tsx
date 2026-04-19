@@ -55,6 +55,10 @@ const Index = () => {
         fontFamily: "Montserrat, sans-serif", fontSize: "1.5rem",
       }}>
         Loading Display...
+      </div>
+    );
+  }
+
   const headerSizeMult = state.headerFontSize ?? 1;
   const headerFamily = state.headerFontFamily || "Montserrat, sans-serif";
   const globalFamily = state.globalFontFamily || "Montserrat, sans-serif";
